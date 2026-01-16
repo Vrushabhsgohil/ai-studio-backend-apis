@@ -116,7 +116,7 @@ class UgcOrchestrationService(OrchestrationService):
 
         Return JSON: {{ "approved": bool, "feedback": "Detailed explanation of issues or 'passed'" }}
         """
-        res_str = openai_service.vision_chat_completion(model="gpt-4o", prompt=prompt, image_b64=image_b64)
+        res_str = openai_service.vision_chat_completion(model="gpt-4.1-nano", prompt=prompt, image_b64=image_b64)
         self.log_info(f"UGC Image Analysis QA Agent Response: {res_str}...")
         qa_res = extract_json_from_text(res_str)
         return qa_res.get("approved", False), qa_res.get("feedback")
