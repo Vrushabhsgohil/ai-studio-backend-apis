@@ -35,3 +35,16 @@ class VideoGenerationResponse(BaseModel):
     qa_feedback: Optional[str] = None
     status: str = "queued"
 
+class VideoRemixRequest(BaseModel):
+    video_id: str = Field(..., description="The ID of the video to remix (OpenAI Job ID or DB ID)")
+    prompt: str = Field(..., description="The new prompt to apply to the video")
+    user_id: Optional[str] = Field(None, description="ID of the user")
+
+    @model_validator(mode='before')
+    @classmethod
+    def check_empty_strings(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get('user_id') == "":
+                data['user_id'] = None
+        return data
+

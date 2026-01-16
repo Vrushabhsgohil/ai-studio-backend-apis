@@ -1,9 +1,10 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from app.schemas.generation import VideoGenerationRequest, VideoGenerationResponse
+from app.schemas.generation import VideoGenerationRequest, VideoGenerationResponse, VideoRemixRequest
 from app.services.orchestration_service import orchestrator
 from app.services.ugc_orchestration_service import ugc_orchestrator
-from app.services.video_tasks import process_video_task
+from app.services.video_tasks import process_video_task, process_remix_task
 from app.core.exceptions import AIStudioError
+from fastapi import BackgroundTasks, HTTPException
+from fastapi import APIRouter
 import logging
 
 router = APIRouter()
@@ -142,3 +143,33 @@ async def download_video(job_id: str):
         raise HTTPException(status_code=404, detail="Video not found locally")
     
     return FileResponse(file_path, media_type="video/mp4", filename=f"{job_id}.mp4")
+
+@router.post("/remix-video", response_model=VideoGenerationResponse)
+async def remix_video(request: VideoRemixRequest, background_tasks: BackgroundTasks):
+    """
+    Triggers video remixing using an existing video (OpenAI Job ID).
+    """
+    logger.info(f"Received request for video remix for {request.video_id}")
+    try:
+        # Initiate DB record
+        video_id = orchestrator.initiate_video_remix(
+            video_id=request.video_id,
+            prompt=request.prompt,
+            user_id=request.user_id
+        )
+        
+        # Add background task for the remix orchestration
+        background_tasks.add_task(
+            process_remix_task,
+            video_db_id=video_id,
+            original_job_id=request.video_id,
+            prompt=request.prompt
+        )
+        
+        return VideoGenerationResponse(job_id=video_id, status="pending")
+
+    except AIStudioError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.message)
+    except Exception as e:
+        logger.error(f"Unexpected error in video remix: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")

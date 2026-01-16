@@ -69,3 +69,23 @@ def process_image_task(
         logger.error(f"Error in background image task for {image_db_id}: {str(e)}")
         from app.services.database_service import db_service
         db_service.update_record("image_assets", image_db_id, {"status": "failed", "error_message": str(e)})
+
+def process_remix_task(
+    video_db_id: str,
+    original_job_id: str,
+    prompt: str
+):
+    """
+    Background task to trigger the video remix orchestration flow.
+    """
+    logger.info(f"Starting background remix task for {video_db_id}")
+    try:
+        orchestrator.run_remix_orchestration_flow(
+            video_db_id=video_db_id,
+            original_job_id=original_job_id,
+            prompt=prompt
+        )
+    except Exception as e:
+        logger.error(f"Error in background remix task for {video_db_id}: {str(e)}")
+        from app.services.database_service import db_service
+        db_service.update_record("video_assets", video_db_id, {"status": "failed", "error_message": str(e)})

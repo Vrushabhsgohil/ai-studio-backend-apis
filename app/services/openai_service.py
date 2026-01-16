@@ -31,6 +31,41 @@ class OpenAIService(BaseService):
             self.log_error(f"OpenAI Chat Completion failed for model {model}", e)
             raise AIServiceError(f"OpenAI service error: {str(e)}")
 
+    def vision_chat_completion(self, model: str, prompt: str, image_b64: Optional[str] = None, image_url: Optional[str] = None, max_tokens: int = 500) -> str:
+        """
+        Chat completion with vision support.
+        """
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+
+        if image_b64:
+            messages[0]["content"].append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{image_b64}"}
+            })
+        elif image_url:
+            messages[0]["content"].append({
+                "type": "image_url",
+                "image_url": {"url": image_url}
+            })
+
+        try:
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            self.log_error(f"OpenAI Vision Chat Completion failed for model {model}", e)
+            raise AIServiceError(f"OpenAI vision service error: {str(e)}")
+
     def moderation_check(self, text: str) -> bool:
         """
         Checks if the text complies with OpenAI moderation policies.
@@ -72,6 +107,26 @@ class OpenAIService(BaseService):
         except Exception as e:
             self.log_error("OpenAI Video Job Creation failed", e)
             raise AIServiceError(f"OpenAI video service error: {str(e)}")
+
+    def remix_video_job(self, previous_video_id: str, prompt: str) -> str:
+        """
+        Remixes an existing video with a new prompt.
+        """
+        url = f"https://api.openai.com/v1/videos/{previous_video_id}/remix"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {"prompt": prompt}
+        
+        try:
+            response = request_with_retry("POST", url, headers=headers, json=payload, timeout=self.settings.REQ_TIMEOUT)
+            if response.status_code >= 300:
+                raise AIServiceError(f"OpenAI video remix failed: {response.text}")
+            return response.json()["id"]
+        except Exception as e:
+            self.log_error(f"OpenAI Video Remix failed for job {previous_video_id}", e)
+            raise AIServiceError(f"OpenAI video remix service error: {str(e)}")
 
     def get_video_job_status(self, job_id: str) -> Dict[str, Any]:
         """
