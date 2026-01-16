@@ -1,0 +1,16 @@
+fastapi[all]
+requests
+pydantic
+pydantic-settings
+openai
+python-dotenv
+uvicorn
+# Keeping previous deps just in case, though user asked for a new setup
+torch 
+diffusers 
+transformers 
+accelerate 
+safetensors
+pillow
+fal_client
+supabase
