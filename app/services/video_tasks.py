@@ -10,7 +10,9 @@ def process_video_task(
     user_content: str,
     reference_image_b64: str,
     voice_over: bool,
-    promo_vibe: str
+    promo_vibe: str,
+    dimensions: str = None,
+    language: str = None
 ):
     """
     Background task to trigger the full orchestration flow.
@@ -34,6 +36,14 @@ def process_video_task(
                 reference_image_b64=reference_image_b64,
                 voice_over=voice_over,
                 promo_vibe=promo_vibe
+            )
+        elif video_type == "general":
+            orchestrator.run_general_orchestration_flow(
+                video_db_id=video_db_id,
+                user_content=user_content,
+                reference_image_b64=reference_image_b64,
+                dimensions=dimensions,
+                language=language
             )
         else:
             orchestrator.run_promo_orchestration_flow(

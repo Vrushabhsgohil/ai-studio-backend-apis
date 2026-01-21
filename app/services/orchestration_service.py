@@ -8,6 +8,7 @@ import uuid
 from app.services.base_service import BaseService
 from app.services.openai_service import openai_service
 from app.services.database_service import db_service
+from app.services.freeflow_agents import AgentSystem
 from app.core.exceptions import ModerationError, AIServiceError, ValidationError, AIStudioError
 from app.core.utils import extract_json_from_text, process_and_resize_image, download_image
 
@@ -46,13 +47,13 @@ class OrchestrationService(BaseService):
         try:
             # 1. Refine Prompt
             db_service.update_record("image_assets", image_db_id, {"status": "pending"}) # Re-assert pending or refine
-            refined_content = self.refine_prompt(content, image_link)
+            # refined_content = self.refine_prompt(content, image_link)
             
             # 2. Generate Image
-            image_url = self.generate_image(refined_content, image_link)
+            image_url = self.generate_image(content, image_link)
             
             # 3. Generate Title
-            title = self._generate_creative_title(refined_content)
+            title = self._generate_creative_title(content)
             
             # 4. Download and Upload to Supabase Storage
             self.log_info(f"Downloading generated image from {image_url}")
@@ -73,7 +74,7 @@ class OrchestrationService(BaseService):
             db_service.update_record("image_assets", image_db_id, {
                 "status": "completed",
                 "image_url": storage_url,
-                "image_prompt": refined_content,
+                "image_prompt": content,
                 "title": title
             })
             
@@ -122,6 +123,10 @@ class OrchestrationService(BaseService):
             raise ValidationError("Reference image must be provided either as base64 or URL")
 
         # 2. Database record creation
+        # Defensive check for "string" literal which causes UUID error in DB
+        if isinstance(user_id, str) and user_id.lower() == "string":
+            user_id = None
+
         video_data = {
             "title": f"{video_type.capitalize()} Video",
             "image_url": reference_image_url,
@@ -151,6 +156,12 @@ class OrchestrationService(BaseService):
             self.log_info(f"{video_id} is not a UUID, assuming it's an OpenAI Job ID")
             existing = None
         
+        # Defensive checks for "string" literal
+        if isinstance(user_id, str) and user_id.lower() == "string":
+            user_id = None
+        if isinstance(video_id, str) and video_id.lower() == "string":
+            raise ValidationError("Invalid video_id: 'string' is not a valid identifier.")
+
         video_data = {
             "title": "Remixed Video",
             "user_content": prompt,
@@ -255,7 +266,86 @@ class OrchestrationService(BaseService):
             self.log_error(f"Promo orchestration flow failed for {video_db_id}", e)
             db_service.update_record("video_assets", video_db_id, {"status": "failed", "error_message": str(e)})
 
-    # --- AGENT HELPERS ---
+    def run_general_orchestration_flow(self, video_db_id: str, user_content: str, reference_image_b64: str, dimensions: str, language: str):
+        """
+        Orchestrates the 6-agent general video generation flow (Agents 1-6).
+        """
+        try:
+            self.log_info(f"Starting general video orchestration flow for {video_db_id}")
+            
+            # 1. Process Image
+            pil_image = None
+            if reference_image_b64:
+                try:
+                    from PIL import Image
+                    import io
+                 
+                    image_data = base64.b64decode(reference_image_b64)
+                    pil_image = Image.open(io.BytesIO(image_data))
+                except Exception as img_err:
+                     self.log_warning(f"Failed to load PIL image from base64: {img_err}")
+
+            # 2. Agent Pipeline
+            self.log_info(f"[{video_db_id}] [Agent 1] Intent Analysis")
+            intent = AgentSystem.agent_1_intent_use_case(user_content, image=pil_image)
+            if not intent:
+                raise AIStudioError("Agent 1 (Intent) failed to generate a response.")
+
+            # [Agent 1b] Script Generation
+            script = ""
+            if language:
+                self.log_info(f"[{video_db_id}] [Agent 1b] Script Generation ({language})")
+                script = AgentSystem.agent_1b_script_generator(intent, language)
+            
+            self.log_info(f"[{video_db_id}] [Agent 2] Visual Direction")
+            visuals = AgentSystem.agent_2_visual_direction(intent, image=pil_image, language=language)
+            if not visuals:
+                raise AIStudioError("Agent 2 (Visuals) failed to generate a response.")
+
+            self.log_info(f"[{video_db_id}] [Agent 3] Scene Breakdown")
+            scenes = AgentSystem.agent_3_scene_breakdown(intent, visuals)
+            if not scenes:
+                raise AIStudioError("Agent 3 (Scenes) failed to generate a response.")
+
+            self.log_info(f"[{video_db_id}] [Agent 4] Motion & Timing")
+            motion = AgentSystem.agent_4_motion_timing(scenes)
+            if not motion:
+                raise AIStudioError("Agent 4 (Motion) failed to generate a response.")
+
+            self.log_info(f"[{video_db_id}] [Agent 5] Safety Review")
+            safety_context = f"Intent: {intent}\nVisuals: {visuals}\nScenes: {scenes}\nMotion: {motion}"
+            safety = AgentSystem.agent_5_safety_compliance(safety_context)
+            if not safety:
+                raise AIStudioError("Agent 5 (Safety) failed to generate a response.")
+
+            self.log_info(f"[{video_db_id}] [Agent 6] Final Prompt Aggregation")
+            final_prompt = AgentSystem.agent_6_final_prompt(
+                intent=intent,
+                visuals=visuals,
+                scenes=scenes,
+                motion=motion,
+                safety=safety,
+                language=language,
+                script=script
+            )
+            if not final_prompt:
+                raise AIStudioError("Agent 6 (Final Prompt) failed to generate a response.")
+
+            self.log_info(f"[{video_db_id}] [FINAL PROMPT] {final_prompt}")
+
+            self.log_info(f"[{video_db_id}] Submitting job to OpenAI")
+            ref_bytes = process_and_resize_image(reference_image_b64) if reference_image_b64 else None
+   
+            job_id = openai_service.create_video_job(final_prompt, ref_bytes)
+            self.log_info(f"[{video_db_id}] OpenAI job created: {job_id}")
+
+            self.poll_and_save_video(video_db_id, job_id, final_prompt)
+            
+        except Exception as e:
+            self.log_error(f"General orchestration flow failed for {video_db_id}", e)
+            db_service.update_record("video_assets", video_db_id, {"status": "failed", "error_message": str(e)})
+
+
 
     def _run_fashion_concept_agent(self, user_content: str) -> str:
         prompt = """

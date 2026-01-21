@@ -45,23 +45,66 @@ def download_image(url: str, timeout: int = 30, retries: int = 3) -> bytes:
 
 def extract_json_from_text(text: str) -> Dict[str, Any]:
     """
-    Extracts a JSON object from a string, handling markdown fences and potential prefix/suffix.
+    Extracts a JSON object from a string, handling markdown fences and balanced nested braces.
     """
+    # 1. Try finding JSON within code blocks first, but use balanced brace matching
+    code_block_match = re.search(r'```(?:json)?\s*', text, re.IGNORECASE)
+    if code_block_match:
+        start_from = code_block_match.end()
+        # Find first '{' after the code block start
+        start_index = text.find('{', start_from)
+        if start_index != -1:
+            json_str = _extract_balanced_json(text, start_index)
+            if json_str:
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError:
+                    pass
+
+    # 2. Try finding JSON anywhere in the text
+    start_index = text.find('{')
+    if start_index != -1:
+        json_str = _extract_balanced_json(text, start_index)
+        if json_str:
+            try:
+                return json.loads(json_str)
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.error(f"Failed to parse JSON from text: {text[:500]}...")
+                raise ValidationError(f"Invalid JSON response from AI service: {str(e)}")
+    
+    # 3. Last ditch: try loading the whole string
     try:
-        # Try finding JSON within code blocks
-        match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-        if match:
-            return json.loads(match.group(1))
-        
-        # Try finding JSON without code blocks
-        match = re.search(r'(\{.*?\})', text, re.DOTALL)
-        if match:
-            return json.loads(match.group(1))
-            
         return json.loads(text)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Failed to parse JSON from text: {text[:200]}...")
-        raise ValidationError(f"Invalid JSON response from AI service: {str(e)}")
+        logger.error(f"Failed to parse JSON from text: {text[:500]}...")
+        raise ValidationError(f"No valid JSON found in response: {str(e)}")
+
+def _extract_balanced_json(text: str, start_index: int) -> Optional[str]:
+    """Helper to extract a balanced JSON string starting from start_index."""
+    brace_count = 0
+    in_string = False
+    escape = False
+    
+    for i in range(start_index, len(text)):
+        char = text[i]
+        
+        if char == '"' and not escape:
+            in_string = not in_string
+        
+        if not in_string:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    return text[start_index:i + 1]
+        
+        if char == '\\':
+            escape = not escape
+        else:
+            escape = False
+            
+    return None
 
 def process_and_resize_image(image_data: str, target_size: tuple = (720, 1280)) -> bytes:
     """

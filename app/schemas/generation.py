@@ -21,12 +21,11 @@ class VideoGenerationRequest(BaseModel):
     @classmethod
     def check_empty_strings(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            if data.get('reference_image_url') == "":
-                data['reference_image_url'] = None
-            if data.get('reference_image_b64') == "":
-                data['reference_image_b64'] = None
-            if data.get('user_id') == "":
-                data['user_id'] = None
+            # Treat empty strings or literal "string" as None
+            for field in ['reference_image_url', 'reference_image_b64', 'user_id']:
+                val = data.get(field)
+                if val == "" or (isinstance(val, str) and val.lower() == "string"):
+                    data[field] = None
         return data
 
 class VideoGenerationResponse(BaseModel):
@@ -44,7 +43,15 @@ class VideoRemixRequest(BaseModel):
     @classmethod
     def check_empty_strings(cls, data: Any) -> Any:
         if isinstance(data, dict):
-            if data.get('user_id') == "":
+            # user_id is optional, so we can set it to None
+            user_id = data.get('user_id')
+            if user_id == "" or (isinstance(user_id, str) and user_id.lower() == "string"):
                 data['user_id'] = None
+                
+            # video_id is required, so if it's "string", we leave it 
+            # so the service layer or pydantic provides a better error than "None is not allowed"
+            video_id = data.get('video_id')
+            if video_id == "":
+                data['video_id'] = None # This will still trigger pydantic error, but that's expected for empty
         return data
 

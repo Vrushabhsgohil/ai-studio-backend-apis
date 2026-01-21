@@ -64,7 +64,7 @@ class ReplicateService:
                 if status in ["starting", "processing"]:
                     logger.info("Replicate prediction still processing despite Prefer: wait")
                     # In a real scenario, we might want to poll here, 
-                    # but for now we follow the user's provided snippet logic.
+                    # but for    we follow the user's provided snippet logic.
                     # If the user wants polling, we can add it similar to FalAI.
                     # However, usually Replicate's synchronous wait handles it.
                 return None
